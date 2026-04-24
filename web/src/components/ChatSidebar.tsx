@@ -146,24 +146,20 @@ export function ChatSidebar({ channel }: ChatSidebarProps) {
       `${proto}//${window.location.host}/api/events?${qs.toString()}`,
     );
 
-    let opened = false
+    // `unmounting` suppresses the banner during cleanup — `ws.close()`
+    // from the effect's return fires a close event with code 1005 that
+    // would otherwise look like an unexpected drop.
+    const DISCONNECTED = "events feed disconnected — tool calls may not appear";
+    let unmounting = false;
+    const surface = (msg: string) => !unmounting && setError(msg);
 
-    ws.addEventListener("open", () => {
-      opened = true
-    });
-
-    ws.addEventListener("error", () => {
-      setError("events feed disconnected — tool calls may not appear");
-    });
+    ws.addEventListener("error", () => surface(DISCONNECTED));
 
     ws.addEventListener("close", (ev) => {
-      // Only surface unexpected drops — clean cleanup-time closes from
-      // the unmount path don't need a banner.  4401/4403 are auth /
-      // loopback rejections from the server (treated as fatal).
       if (ev.code === 4401 || ev.code === 4403) {
-        setError(`events feed rejected (${ev.code}) — reload the page`);
-      } else if (opened && ev.code !== 1000 && ev.code !== 1001) {
-        setError("events feed disconnected — tool calls may not appear");
+        surface(`events feed rejected (${ev.code}) — reload the page`);
+      } else if (ev.code !== 1000) {
+        surface(DISCONNECTED);
       }
     });
 
@@ -254,6 +250,7 @@ export function ChatSidebar({ channel }: ChatSidebarProps) {
     });
 
     return () => {
+      unmounting = true;
       ws.close();
     };
   }, [channel, version]);
