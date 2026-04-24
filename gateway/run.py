@@ -651,6 +651,30 @@ def _format_gateway_process_notification(evt: dict) -> "str | None":
     return None
 
 
+def _history_has_conversation_messages(history: List[Dict[str, Any]]) -> bool:
+    """Return True when transcript history already contains real conversation."""
+    for msg in history or []:
+        role = msg.get("role")
+        if not role or role in ("session_meta", "system"):
+            continue
+        if role == "tool":
+            return True
+        if msg.get("tool_calls") or msg.get("tool_call_id"):
+            return True
+        if msg.get("content"):
+            return True
+    return False
+
+
+def _should_bootstrap_auto_skills(session_entry, history: List[Dict[str, Any]]) -> bool:
+    """Return True when bound auto-skills still need first-turn injection."""
+    is_new_session = (
+        session_entry.created_at == session_entry.updated_at
+        or getattr(session_entry, "was_auto_reset", False)
+    )
+    return is_new_session or not _history_has_conversation_messages(history)
+
+
 class GatewayRunner:
     """
     Main gateway controller.
@@ -4125,6 +4149,7 @@ class GatewayRunner:
         # Get or create session
         session_entry = self.session_store.get_or_create_session(source)
         session_key = session_entry.session_key
+        history = self.session_store.load_transcript(session_entry.session_id)
         
         # Emit session:start for new or auto-reset sessions
         _is_new_session = (
@@ -4224,10 +4249,12 @@ class GatewayRunner:
 
         # Auto-load skill(s) for topic/channel bindings (Telegram DM Topics,
         # Discord channel_skill_bindings).  Supports a single name or ordered list.
-        # Only inject on NEW sessions — ongoing conversations already have the
-        # skill content in their conversation history from the first message.
+        # Inject on session bootstrap. Most sessions are detected via timestamp
+        # metadata, but restarts can leave behind an existing session entry with
+        # no conversation history yet.
         _auto = getattr(event, "auto_skill", None)
-        if _is_new_session and _auto:
+        _needs_auto_skill_bootstrap = _should_bootstrap_auto_skills(session_entry, history)
+        if _needs_auto_skill_bootstrap and _auto:
             _skill_names = [_auto] if isinstance(_auto, str) else list(_auto)
             try:
                 from agent.skill_commands import _load_skill_payload, _build_skill_message
@@ -4258,9 +4285,6 @@ class GatewayRunner:
             except Exception as e:
                 logger.warning("[Gateway] Failed to auto-load skill(s) %s: %s", _skill_names, e)
 
-        # Load conversation history from transcript
-        history = self.session_store.load_transcript(session_entry.session_id)
-        
         # -----------------------------------------------------------------
         # Session hygiene: auto-compress pathologically large transcripts
         #
