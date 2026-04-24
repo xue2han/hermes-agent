@@ -1240,7 +1240,11 @@ class GatewayRunner:
             return route
 
         try:
-            overrides = resolve_fast_mode_overrides(route["model"])
+            overrides = resolve_fast_mode_overrides(
+                route["model"],
+                provider=runtime.get("provider"),
+                api_mode=runtime.get("api_mode"),
+            )
         except Exception:
             overrides = None
         route["request_overrides"] = overrides
@@ -6950,9 +6954,9 @@ class GatewayRunner:
             return f"🧠 ✓ Reasoning effort set to `{effort}` (this session only)"
 
     async def _handle_fast_command(self, event: MessageEvent) -> str:
-        """Handle /fast — mirror the CLI Priority Processing toggle in gateway chats."""
+        """Handle /fast — mirror the CLI fast-mode toggle in gateway chats."""
         import yaml
-        from hermes_cli.models import model_supports_fast_mode
+        from hermes_cli.models import _is_anthropic_fast_model, model_supports_fast_mode, runtime_supports_priority_processing
 
         args = event.get_command_args().strip().lower()
         config_path = _hermes_home / "config.yaml"
@@ -6960,8 +6964,19 @@ class GatewayRunner:
 
         user_config = _load_gateway_config()
         model = _resolve_gateway_model(user_config)
-        if not model_supports_fast_mode(model):
-            return "⚡ /fast is only available for OpenAI models that support Priority Processing."
+        try:
+            runtime_kwargs = _resolve_runtime_agent_kwargs()
+        except Exception:
+            runtime_kwargs = {}
+        if not model_supports_fast_mode(model) and not runtime_supports_priority_processing(
+            runtime_kwargs.get("provider"),
+            runtime_kwargs.get("api_mode"),
+        ):
+            return (
+                "⚡ /fast is only available for models that support fast mode "
+                "(OpenAI Priority Processing, OpenAI/Codex-compatible custom providers, or Anthropic Fast Mode)."
+            )
+        feature_name = "Anthropic Fast Mode" if _is_anthropic_fast_model(model) else "Priority Processing"
 
         def _save_config_key(key_path: str, value):
             """Save a dot-separated key to config.yaml."""
@@ -6986,7 +7001,7 @@ class GatewayRunner:
         if not args or args == "status":
             status = "fast" if self._service_tier == "priority" else "normal"
             return (
-                "⚡ Priority Processing\n\n"
+                f"⚡ {feature_name}\n\n"
                 f"Current mode: `{status}`\n\n"
                 "_Usage:_ `/fast <normal|fast|status>`"
             )
@@ -7006,8 +7021,8 @@ class GatewayRunner:
             )
 
         if _save_config_key("agent.service_tier", saved_value):
-            return f"⚡ ✓ Priority Processing: **{label}** (saved to config)\n_(takes effect on next message)_"
-        return f"⚡ ✓ Priority Processing: **{label}** (this session only)"
+            return f"⚡ ✓ {feature_name}: **{label}** (saved to config)\n_(takes effect on next message)_"
+        return f"⚡ ✓ {feature_name}: **{label}** (this session only)"
 
     async def _handle_yolo_command(self, event: MessageEvent) -> str:
         """Handle /yolo — toggle dangerous command approval bypass for this session only."""

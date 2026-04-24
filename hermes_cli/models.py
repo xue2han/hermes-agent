@@ -1576,7 +1576,30 @@ def _is_anthropic_fast_model(model_id: Optional[str]) -> bool:
     return base in _ANTHROPIC_FAST_MODE_MODELS
 
 
-def resolve_fast_mode_overrides(model_id: Optional[str]) -> dict[str, Any] | None:
+def runtime_supports_priority_processing(
+    provider: Optional[str] = None,
+    api_mode: Optional[str] = None,
+) -> bool:
+    """Return True for OpenAI/Codex-compatible runtimes that accept service_tier.
+
+    This covers saved custom providers that point at an OpenAI-compatible or
+    Codex Responses-compatible endpoint even when their model name is not in
+    the public OpenAI Priority Processing model table.
+    """
+    provider_key = str(provider or "").strip().lower()
+    api_mode_key = str(api_mode or "").strip().lower()
+    if provider_key in {"openai", "openai-codex"}:
+        return True
+    if provider_key.startswith("custom"):
+        return api_mode_key in {"chat_completions", "responses", "codex_responses"}
+    return False
+
+
+def resolve_fast_mode_overrides(
+    model_id: Optional[str],
+    provider: Optional[str] = None,
+    api_mode: Optional[str] = None,
+) -> dict[str, Any] | None:
     """Return request_overrides for fast/priority mode, or None if unsupported.
 
     Returns provider-appropriate overrides:
@@ -1587,10 +1610,10 @@ def resolve_fast_mode_overrides(model_id: Optional[str]) -> dict[str, Any] | Non
     ``_build_api_kwargs`` in run_agent.py — each API path handles its own
     keys (service_tier for OpenAI/Codex, speed for Anthropic Messages).
     """
-    if not model_supports_fast_mode(model_id):
-        return None
     if _is_anthropic_fast_model(model_id):
         return {"speed": "fast"}
+    if not model_supports_fast_mode(model_id) and not runtime_supports_priority_processing(provider, api_mode):
+        return None
     return {"service_tier": "priority"}
 
 
