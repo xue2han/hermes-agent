@@ -4262,7 +4262,7 @@ class FeishuAdapter(BasePlatformAdapter):
             body = self._build_reply_message_body(
                 content=payload,
                 msg_type=msg_type,
-                reply_in_thread=True,
+                reply_in_thread=reply_in_thread,
                 uuid_value=str(uuid.uuid4()),
             )
             request = self._build_reply_message_request(effective_reply_to, body)
