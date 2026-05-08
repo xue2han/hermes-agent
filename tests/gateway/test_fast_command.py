@@ -118,7 +118,7 @@ def test_turn_route_skips_priority_processing_for_unsupported_models():
 
     route = gateway_run.GatewayRunner._resolve_turn_agent_config(runner, "hi", "gpt-5.3-codex", runtime_kwargs)
 
-    assert route["request_overrides"] is None
+    assert route["request_overrides"] == {}
 
 
 def test_turn_route_injects_speed_for_anthropic_fast_mode():
@@ -227,7 +227,7 @@ async def test_handle_fast_command_unsupported_message_mentions_both_fast_modes(
 
     monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
     monkeypatch.setattr(gateway_run, "_load_gateway_config", lambda: {})
-    monkeypatch.setattr(gateway_run, "_resolve_gateway_model", lambda config=None: "claude-sonnet-4-6")
+    monkeypatch.setattr(gateway_run, "_resolve_gateway_model", lambda config=None: "deepseek-chat")
 
     response = await runner._handle_fast_command(_make_event("/fast fast"))
 
