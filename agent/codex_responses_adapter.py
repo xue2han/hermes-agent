@@ -827,8 +827,8 @@ def _normalize_codex_response(response: Any) -> tuple[Any, str]:
     message_items_raw: List[Dict[str, Any]] = []
     tool_calls: List[Any] = []
     has_incomplete_items = response_status in {"queued", "in_progress", "incomplete"}
-    saw_commentary_phase = False
-    saw_final_answer_phase = False
+    saw_hidden_phase_message_text = False
+    saw_unknown_phase_message_text = False
 
     for item in output:
         item_type = getattr(item, "type", None)
@@ -846,13 +846,20 @@ def _normalize_codex_response(response: Any) -> tuple[Any, str]:
             normalized_phase = None
             if isinstance(item_phase, str):
                 normalized_phase = item_phase.strip().lower()
-                if normalized_phase in {"commentary", "analysis"}:
-                    saw_commentary_phase = True
-                elif normalized_phase in {"final_answer", "final"}:
-                    saw_final_answer_phase = True
             message_text = _extract_responses_message_text(item)
             if message_text:
-                content_parts.append(message_text)
+                is_hidden_phase = normalized_phase in {"commentary", "analysis"}
+                is_visible_phase = normalized_phase in {None, "", "final_answer", "final"}
+                if is_hidden_phase:
+                    saw_hidden_phase_message_text = True
+                elif not is_visible_phase:
+                    saw_unknown_phase_message_text = True
+                    logger.warning(
+                        "Codex response message has unknown phase %r; hiding it and treating response as incomplete.",
+                        normalized_phase,
+                    )
+                if is_visible_phase:
+                    content_parts.append(message_text)
                 raw_message_item: Dict[str, Any] = {
                     "type": "message",
                     "role": "assistant",
@@ -934,7 +941,7 @@ def _normalize_codex_response(response: Any) -> tuple[Any, str]:
             ))
 
     final_text = "\n".join([p for p in content_parts if p]).strip()
-    if not final_text and hasattr(response, "output_text"):
+    if not final_text and not (saw_hidden_phase_message_text or saw_unknown_phase_message_text) and hasattr(response, "output_text"):
         out_text = getattr(response, "output_text", "")
         if isinstance(out_text, str):
             final_text = out_text.strip()
@@ -984,7 +991,7 @@ def _normalize_codex_response(response: Any) -> tuple[Any, str]:
         finish_reason = "tool_calls"
     elif leaked_tool_call_text:
         finish_reason = "incomplete"
-    elif has_incomplete_items or (saw_commentary_phase and not saw_final_answer_phase):
+    elif has_incomplete_items or ((saw_hidden_phase_message_text or saw_unknown_phase_message_text) and not final_text):
         finish_reason = "incomplete"
     elif reasoning_items_raw and not final_text:
         # Response contains only reasoning (encrypted thinking state) with
